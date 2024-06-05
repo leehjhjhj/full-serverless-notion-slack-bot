@@ -9,10 +9,10 @@ class ScanService:
     def __init__(self):
         self._connect_list_table = DynamoDBClient('notion_slack_list')
         self._schedule_table = DynamoDBClient('notion_slack_schedule')
-        self._lambda_client = boto3.client('lambda')
+        self._sqs = boto3.client('sqs')
     
     def scan_and_schedule_page(self):
-        connect_list = self._connect_list_table.scan().get('Items')
+        connect_list = self._connect_list_table.table.scan().get('Items')
         scheduled_page_ids = self._get_scheduled_page_ids()
         for connect in connect_list:
             if connect['status'] == "deactivate":
@@ -22,21 +22,18 @@ class ScanService:
                 page: NotionPage = self._farthing_calender_data(result)
                 if self._check_can_schedule_page(page, scheduled_page_ids):
                     self._schedule_table.put_data(page)
-                    response = self._send_message_to_schedule_lambda(page, connect['slack_url'], connect['slack_channels'])
+                    response = self._send_message_to_sqs(page, connect['slack_url'])
                     return response
 
     
-    def _send_message_to_schedule_lambda(self, page: NotionPage, slack_url: str, slack_channels):
-        response = self._lambda_client.invoke(
-            FunctionName='schedule_lambda',
-            InvocationType='Event',
-            Payload=json.dumps(
-                {
-                    "page_data": dict(page),
-                    "slack_url": slack_url,
-                    "slack_channels": slack_channels
-                }
-            ))
+    def _send_message_to_sqs(self, page: NotionPage, slack_url: str):
+        response = self._sqs.send_message(
+            QueueUrl='https://sqs.ap-northeast-2.amazonaws.com/654654343720/toScheduler',
+            MessageBody=json.dumps({
+                "page": dict(page),
+                "slack_url": slack_url
+            }),
+        )
         return response
 
     def _scan_notion_database(self, notion_api_key: str, notion_database_id: str):
