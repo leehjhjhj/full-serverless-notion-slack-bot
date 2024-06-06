@@ -12,21 +12,25 @@ class ScanService:
         self._sqs = boto3.client('sqs')
     
     def scan_and_schedule_page(self):
-        connect_list = self._connect_list_table.table.scan().get('Items')
-        scheduled_page_ids = self._get_scheduled_page_ids()
-        for connect in connect_list:
-            if connect['status'] == "deactivate":
-                continue
-            results = self._scan_notion_database(connect['notion_api_key'], connect['notion_database_id'])
-            for result in results:
-                page: NotionPage = self._farthing_calender_data(result, connect['connection_name'])
-                if self._check_can_schedule_page(page, scheduled_page_ids):
-                    page.time = page.time.isoformat()
-                    self._schedule_table.put_data(dict(page))
-                    response = self._send_message_to_sqs(page, connect['slack_url'])
-                    print(response)
-                    return response
-
+        try:
+            connect_list = self._connect_list_table.table.scan().get('Items')
+            scheduled_page_ids = self._get_scheduled_page_ids()
+            for connect in connect_list:
+                if connect['status'] == "deactivate":
+                    continue
+                results = self._scan_notion_database(connect['notion_api_key'], connect['notion_database_id'])
+                for result in results:
+                    page: NotionPage = self._farthing_calender_data(result, connect['connection_name'])
+                    if self._check_can_schedule_page(page, scheduled_page_ids):
+                        page.time = page.time.isoformat()
+                        self._schedule_table.put_data(dict(page))
+                        try:
+                            response = self._send_message_to_sqs(page, connect['slack_url'])
+                            print(f"send to sqs: {response}")
+                        except Exception as e:
+                            print(f"fail sending to sqs: {e}")
+        except Exception as e:
+            print(e)
     
     def _send_message_to_sqs(self, page: NotionPage, slack_url: str):
         response = self._sqs.send_message(
@@ -58,11 +62,13 @@ class ScanService:
         ).get('Items')
         page_ids = [item['page_id'] for item in response]
         return set(page_ids)
-    
+        
     def _check_can_schedule_page(self, page, scheduled_page_ids):
         if not self._check_meeting_status(page.status):
             return False
-        if self._check_meeting_time(page.time) and not self._check_meeting_id(page.page_id, scheduled_page_ids):
+        if page.page_id in scheduled_page_ids:
+            return False
+        if not self._check_meeting_time(page.time):
             return False
         return True
 
@@ -91,16 +97,11 @@ class ScanService:
         if status == "확정":
             return True
         return False
-    
-    def _check_meeting_id(self, target_id, meeting_ids):
-        if target_id in meeting_ids:
-            return True
-        else:
-            return False
 
     def _check_meeting_time(self, meeting_time):
         try:
-            now = datetime.now(tz=timezone('Asia/Seoul'))
+            seoul = timezone(timedelta(hours=9))
+            now = datetime.now(tz=seoul)
             day_after_tomorrow_start = (now + timedelta(days=2)).replace(hour=0, minute=0, second=0, microsecond=0)
             if now <= meeting_time < day_after_tomorrow_start:
                 return True
@@ -108,4 +109,7 @@ class ScanService:
         except TypeError as e:
             if str(e) == "can't compare offset-naive and offset-aware datetimes":
                 print(f'시간 에러, 노션 DB 시간 수정 요망: {e}')
+                return False
+            else:
+                print(f"시간 에러: {e}")
                 return False
