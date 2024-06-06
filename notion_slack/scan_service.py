@@ -19,10 +19,12 @@ class ScanService:
                 continue
             results = self._scan_notion_database(connect['notion_api_key'], connect['notion_database_id'])
             for result in results:
-                page: NotionPage = self._farthing_calender_data(result)
+                page: NotionPage = self._farthing_calender_data(result, connect['connection_name'])
                 if self._check_can_schedule_page(page, scheduled_page_ids):
-                    self._schedule_table.put_data(page)
+                    page.time = page.time.isoformat()
+                    self._schedule_table.put_data(dict(page))
                     response = self._send_message_to_sqs(page, connect['slack_url'])
+                    print(response)
                     return response
 
     
@@ -51,7 +53,7 @@ class ScanService:
         return results
 
     def _get_scheduled_page_ids(self):
-        response = self._schedule_table.scan(
+        response = self._schedule_table.table.scan(
             ProjectionExpression='page_id'
         ).get('Items')
         page_ids = [item['page_id'] for item in response]
@@ -64,18 +66,18 @@ class ScanService:
             return False
         return True
 
-    def _farthing_calender_data(self, scan_result):
+    def _farthing_calender_data(self, scan_result, connection_name):
         properties = scan_result.get('properties', {})
         status_str = properties.get("확정여부", {}).get("multi_select", [{}])[0].get("name")
         status_enum = StatusChoice(status_str) if status_str else None
         notion_database_id=scan_result.get("parent",{}).get("database_id").replace('-','')
         time = datetime.fromisoformat(properties.get("날짜", {}).get("date", {}).get("start"))
-
         page = NotionPage(
+            connection_name=connection_name,
             page_id=scan_result.get('id'),
             notion_database_id=notion_database_id,
             status=status_enum,
-            time=self.time_to_utc9(time),
+            time=time,
             meeting_type=properties.get("종류", {}).get("multi_select", [{}])[0].get("name"),
             meeting_url=scan_result.get('url'),
             name=properties.get("이름", {}).get("title", [{}])[0].get('text').get('content'),
@@ -83,10 +85,10 @@ class ScanService:
         return page
     
     def time_to_utc9(self, time):
-        return time.astimezone(timezone('Asia/Seoul'))
+        return time
     
     def _check_meeting_status(self, status):
-        if status == StatusChoice.CONFIRMED:
+        if status == "확정":
             return True
         return False
     
