@@ -6,7 +6,7 @@ client = boto3.client('scheduler')
 schedule_mapping = {
     "-1-day": timedelta(days=1),
     "-5-hour": timedelta(hours=5),
-    "-5-mins": timedelta(minutes=5),
+    "-10-mins": timedelta(minutes=10),
 }
 
 def check_before_time(result_time):
@@ -31,8 +31,9 @@ def create_eventbridge_rule(target_arn, page, slack_url):
             if not check_before_time(result_time):
                 continue
             pasred_time = result_time.isoformat().split('+')[0]
+            schedule_name = page_name + mapping_name
             response = client.create_schedule(
-            Name=page_name + mapping_name,
+            Name=schedule_name,
             ScheduleExpression=f'at({pasred_time})',
             ScheduleExpressionTimezone='Asia/Seoul',
             ActionAfterCompletion='DELETE',
