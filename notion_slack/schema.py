@@ -9,7 +9,8 @@ class StatusChoice(enum.Enum):
     UNDEFINED = "미정"
 
 class NotionPage(BaseModel):
-    page_id: int
+    connection_name: str
+    page_id: str
     notion_database_id: str
     status: str
     time: datetime
