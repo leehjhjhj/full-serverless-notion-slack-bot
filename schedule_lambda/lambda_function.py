@@ -3,32 +3,53 @@ import json
 from datetime import datetime, timedelta, timezone
 
 client = boto3.client('scheduler')
-lambda_client = boto3.client('lambda')
+schedule_mapping = {
+    "-1-day": timedelta(days=1),
+    "-5-hour": timedelta(hours=5),
+    "-5-mins": timedelta(minutes=5),
+}
 
-def make_schedule_time(minute: int):
+def check_before_time(result_time):
     seoul = timezone(timedelta(hours=9))
-    return (datetime.now(tz=seoul)+ timedelta(minutes=minute)).strftime('%Y-%m-%dT%H:%M:%S')
+    now = datetime.now(tz=seoul)
+    return now <= result_time
 
-def create_eventbridge_rule(rule_name, target_arn, input_payload):
-    # EventBridge 규칙 생성
-    response = client.create_schedule(
-    Name=rule_name,
-    ScheduleExpression=f'at({make_schedule_time(5)})',
-    ScheduleExpressionTimezone='Asia/Seoul',
-    ActionAfterCompletion='DELETE',
-    FlexibleTimeWindow={
-        'Mode': 'OFF'
-    },
-    Target={
-            'Arn': target_arn,
-            'RoleArn': 'arn:aws:iam::831576238138:role/eventbridge-lambda',
-            'Input': json.dumps(input_payload) if input_payload else '{}'
-    })
-    print(response)
+def make_schedule_time(page_time, mapping_time):
+    page_date_time = datetime.fromisoformat(page_time)
+    return page_date_time - mapping_time
+
+def create_eventbridge_rule(target_arn, page):
+    try:
+        page_name = page['name']
+        page_time = page['time']
+        for mapping_name, mapping_time in schedule_mapping.items():
+            result_time = make_schedule_time(page_time, mapping_time)
+            if not check_before_time(result_time):
+                continue
+            pasred_time = result_time.isoformat().split('+')[0]
+            response = client.create_schedule(
+            Name=page_name + mapping_name,
+            ScheduleExpression=f'at({pasred_time})',
+            ScheduleExpressionTimezone='Asia/Seoul',
+            ActionAfterCompletion='DELETE',
+            FlexibleTimeWindow={
+                'Mode': 'OFF'
+            },
+            Target={
+                'Arn': target_arn,
+                'RoleArn': 'arn:aws:iam::654654343720:role/eventbridge-sns',
+                'Input': json.dumps(page) if page else '{}'
+            })
+            print(response)
+    except Exception as e:
+        print(e)
 
 def lambda_handler(event, context):
-    
-    create_eventbridge_rule('test-scheduler', 'arn:aws:lambda:ap-northeast-2:831576238138:function:eventbridge-test', None)
+    records = event['Records']
+    for record in records:
+        body = json.loads(record['body'])
+        page = body['page']
+        create_eventbridge_rule('arn:aws:sns:ap-northeast-2:654654343720:toSender', page)
     response = {
         'statusCode': 200
     }
