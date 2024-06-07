@@ -20,8 +20,9 @@ def make_schedule_time(page_time, mapping_time):
 
 def create_eventbridge_rule(target_arn, page, slack_url):
     try:
-        page_name = page['name']
+        page_id = page['page_id']
         page_time = page['time']
+        connection_name = page['connection_name']
         data = {
             "page": page,
             "slack_url": slack_url
@@ -30,20 +31,25 @@ def create_eventbridge_rule(target_arn, page, slack_url):
             result_time = make_schedule_time(page_time, mapping_time)
             if not check_before_time(result_time):
                 continue
-            pasred_time = result_time.isoformat().split('+')[0]
-            schedule_name = page_name + mapping_name
+            parsed_time = result_time.isoformat().split('+')[0]
+            schedule_name = connection_name + '-' + page_id + mapping_name
+            data['schedule_name'] = schedule_name
             response = client.create_schedule(
             Name=schedule_name,
-            ScheduleExpression=f'at({pasred_time})',
+            ScheduleExpression=f'at({parsed_time})',
             ScheduleExpressionTimezone='Asia/Seoul',
             ActionAfterCompletion='DELETE',
             FlexibleTimeWindow={
                 'Mode': 'OFF'
             },
             Target={
-                    'Arn': target_arn,
-                    'RoleArn': 'arn:aws:iam::654654343720:role/eventbridge-sns',
-                    'Input': json.dumps(data) if page else '{}'
+                'Arn': target_arn,
+                'RoleArn': 'arn:aws:iam::654654343720:role/eventbridge-sns',
+                'Input': json.dumps(data) if page else '{}',
+                'RetryPolicy': {
+                    'MaximumEventAgeInSeconds': 60,
+                    'MaximumRetryAttempts': 3
+                }
             })
             print(response)
     except Exception as e:
