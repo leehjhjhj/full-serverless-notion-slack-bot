@@ -2,6 +2,7 @@ from dynamodb import DynamoDBClient
 import requests
 from datetime import datetime, timezone, timedelta
 from schema import NotionPage, StatusChoice
+from boto3.dynamodb.conditions import Key
 import boto3
 import json
 
@@ -14,10 +15,10 @@ class ScanService:
     def scan_and_schedule_page(self):
         try:
             connect_list = self._connect_list_table.table.scan().get('Items')
-            scheduled_page_ids = self._get_scheduled_page_ids()
             for connect in connect_list:
                 if connect['status'] == "deactivate":
                     continue
+                scheduled_page_ids = self._get_scheduled_page_ids(connect['connection_name'])
                 results = self._scan_notion_database(connect['notion_api_key'], connect['notion_database_id'])
                 for result in results:
                     page: NotionPage = self._farthing_calender_data(result, connect['connection_name'])
@@ -56,19 +57,23 @@ class ScanService:
         results = data.get('results')
         return results
 
-    def _get_scheduled_page_ids(self):
-        response = self._schedule_table.table.scan(
-            ProjectionExpression='page_id'
-        ).get('Items')
-        page_ids = [item['page_id'] for item in response]
+    def _get_scheduled_page_ids(self, connection_name):
+        query_params = {
+            'KeyConditionExpression': Key('connection_name').eq(connection_name)
+        }
+        items = self._schedule_table.table.query(**query_params).get('Items', [])
+        page_ids = [item['page_id'] for item in items]
         return set(page_ids)
         
     def _check_can_schedule_page(self, page, scheduled_page_ids):
         if not self._check_meeting_status(page.status):
+            # print(page.name, "False1")
             return False
         if page.page_id in scheduled_page_ids:
+            # print(page.name, "False2")
             return False
         if not self._check_meeting_time(page.time):
+            # print(page.name, "False3")
             return False
         return True
 
