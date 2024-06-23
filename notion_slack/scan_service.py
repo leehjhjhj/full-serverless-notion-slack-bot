@@ -79,7 +79,9 @@ class ScanService:
 
     def _farthing_calender_data(self, scan_result, connection_name):
         properties = scan_result.get('properties', {})
-        status_str = properties.get("확정여부", {}).get("multi_select", [{}])[0].get("name")
+        multi_select = properties.get("확정여부", {}).get("multi_select")
+        if multi_select:
+            status_str = multi_select[0].get("name")
         status_enum = StatusChoice(status_str) if status_str else None
         notion_database_id=scan_result.get("parent",{}).get("database_id").replace('-','')
         time = datetime.fromisoformat(properties.get("날짜", {}).get("date", {}).get("start"))
